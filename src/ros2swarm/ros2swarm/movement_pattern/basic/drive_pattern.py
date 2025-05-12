@@ -2,9 +2,9 @@
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Twist
-from sensor_msgs.msg import LaserScan
-import numpy as np
+from nav_msgs.msg import Odometry
 import math
+
 
 class DrivePatternNode(Node):
     def __init__(self):
