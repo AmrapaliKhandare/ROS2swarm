@@ -12,7 +12,7 @@
 #    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #    See the License for the specific language governing permissions and
 #    limitations under the License.
-colcon build --symlink-install --allow-overriding communication_interfaces launch_gazebo ros2swarm&&
+colcon build --symlink-install &&
 source ./install/setup.bash &&
  ROS_DOMAIN_ID=42 ros2 launch launch_gazebo create_enviroment.launch.py \
  gazebo_world:=arena_large.world \
@@ -27,8 +27,9 @@ source ./install/setup.bash &&
  y_start:=0.0 \
  y_dist:=1.0 \
  driving_swarm:=False \
- logging:=True 
-
+ logging:=True \
+ robot_names_file:=/root/driving_swarm_infrastructure/s
+rc/driving_swarm_bringup/config/robot_names/robot4.yaml
  
 # to add heterogeneous swarm / robots  
 # bash add_robots_to_simulation.sh 
