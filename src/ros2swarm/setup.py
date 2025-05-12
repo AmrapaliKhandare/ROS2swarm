@@ -125,6 +125,9 @@ setup(
             'ros2swarm.movement_pattern.basic.minimalist_flocking_pattern:main',
             'rat_search_pattern = '
             'ros2swarm.movement_pattern.basic.rat_search_pattern:main',
+            'diamond_shrink_expand_pattern = '
+            'ros2swarm.movement_pattern.basic.diamond_shrink_expand_pattern:main',
+
             # movement_pattern.combined
             'discussed_dispersion_pattern = '
             'ros2swarm.movement_pattern.combined.discussed_dispersion_pattern:main',
