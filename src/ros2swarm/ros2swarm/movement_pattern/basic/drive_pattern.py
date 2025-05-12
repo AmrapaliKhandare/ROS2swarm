@@ -11,50 +11,67 @@ class DrivePatternNode(Node):
         super().__init__('drive_pattern')
 
         self.declare_parameter('robot_id', 1)
-        self.declare_parameter('loop_rate', 0.2)
         self.robot_id = self.get_parameter('robot_id').value
-        self.loop_rate = self.get_parameter('loop_rate').value
 
         self.cmd_pub = self.create_publisher(Twist, 'cmd_vel', 10)
-        self.timer = self.create_timer(self.loop_rate, self.timer_callback)
+        self.odom_sub = self.create_subscription(Odometry, 'odom', self.odom_callback, 10)
 
-        self.state = 1  # 1: forming diamond, 2: moving straight
-        self.start_time = self.get_clock().now().seconds_nanoseconds()[0]
+        self.x = 0.0
+        self.y = 0.0
+        self.yaw = 0.0
 
-    def get_command(self):
-        """
-        Define robot behavior per state.
-        """
-        formation = {
-            1: {  # Form diamond
-                1: [0.2, 0.3],   # top left
-                2: [0.2, 0.6],   # top right
-                3: [0.2, -0.6],  # bottom left
-                4: [0.2, -0.3],  # bottom right
-            },
-            2: {  # Move straight
-                1: [0.2, 0.0],
-                2: [0.2, 0.0],
-                3: [0.2, 0.0],
-                4: [0.2, 0.0],
-            }
+        self.reached = False
+        self.state = 1  # 1 = move to position, 2 = move forward
+        self.timer = self.create_timer(0.1, self.timer_callback)
+
+        # Define diamond target positions
+        self.targets = {
+            1: (1.5, 1.5),   # top
+            2: (2.5, 0.0),   # right
+            3: (0.5, 0.0),   # left
+            4: (1.5, -1.5)   # bottom
         }
-        return formation[self.state].get(self.robot_id, [0.0, 0.0])
+
+        self.goal_x, self.goal_y = self.targets[self.robot_id]
+
+    def odom_callback(self, msg):
+        self.x = msg.pose.pose.position.x
+        self.y = msg.pose.pose.position.y
+
+        q = msg.pose.pose.orientation
+        siny_cosp = 2.0 * (q.w * q.z + q.x * q.y)
+        cosy_cosp = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
+        self.yaw = math.atan2(siny_cosp, cosy_cosp)
 
     def timer_callback(self):
-        now = self.get_clock().now().seconds_nanoseconds()[0]
-        elapsed = now - self.start_time
-
-        if self.state == 1 and elapsed > 10:
-            self.state = 2
-            self.get_logger().info("Diamond formed. Now moving forward.")
-            self.start_time = now
-
-        linear, angular = self.get_command()
         cmd = Twist()
-        cmd.linear.x = linear
-        cmd.angular.z = angular
+
+        if self.state == 1:
+            dx = self.goal_x - self.x
+            dy = self.goal_y - self.y
+            distance = math.hypot(dx, dy)
+            target_angle = math.atan2(dy, dx)
+            angle_diff = self.normalize_angle(target_angle - self.yaw)
+
+            if distance > 0.1:
+                cmd.linear.x = min(0.2, distance)
+                cmd.angular.z = 1.5 * angle_diff
+            else:
+                self.get_logger().info(f"Robot {self.robot_id} reached diamond point.")
+                self.state = 2  # Switch to move-forward phase
+
+        elif self.state == 2:
+            cmd.linear.x = 0.2
+            cmd.angular.z = 0.0
+
         self.cmd_pub.publish(cmd)
+
+    def normalize_angle(self, angle):
+        while angle > math.pi:
+            angle -= 2 * math.pi
+        while angle < -math.pi:
+            angle += 2 * math.pi
+        return angle
 
 def main(args=None):
     rclpy.init(args=args)
