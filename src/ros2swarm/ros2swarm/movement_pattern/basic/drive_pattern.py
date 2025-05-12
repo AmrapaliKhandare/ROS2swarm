@@ -1,76 +1,100 @@
-#    Copyright 2020 Marian Begemann
-#
-#    Licensed under the Apache License, Version 2.0 (the "License");
-#    you may not use this file except in compliance with the License.
-#    You may obtain a copy of the License at
-#
-#        http://www.apache.org/licenses/LICENSE-2.0
-#
-#    Unless required by applicable law or agreed to in writing, software
-#    distributed under the License is distributed on an "AS IS" BASIS,
-#    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#    See the License for the specific language governing permissions and
-#    limitations under the License.
+
+import rclpy
+from rclpy.node import Node
 from geometry_msgs.msg import Twist
-from ros2swarm.movement_pattern.movement_pattern import MovementPattern
-from ros2swarm.utils import setup_node
+from sensor_msgs.msg import LaserScan
+import numpy as np
+import math
 
-
-class DrivePattern(MovementPattern):
-    """
-    A simple pattern for driving a constant direction vector.
-
-    Which is configured in with the parameters of this pattern.
-    How often the direction is published is configured in the timer period parameter.
-    """
-
+class DrivePatternNode(Node):
     def __init__(self):
-        """Initialize the drive pattern."""
         super().__init__('drive_pattern')
 
-        self.declare_parameters(
-            namespace='',
-            parameters=[
-                ('drive_timer_period', 0.0),
-                ('drive_linear', 0.0),
-                ('drive_angular', 0.0),
-            ])
+        self.declare_parameter('robot_id', 1)
+        self.declare_parameter('loop_rate', 0.2)
+        self.robot_id = self.get_parameter('robot_id').value
+        self.loop_rate = self.get_parameter('loop_rate').value
 
-        timer_period = float(
-            self.get_parameter("drive_timer_period").get_parameter_value().double_value)
-        self.timer = self.create_timer(timer_period, self.swarm_command_controlled_timer(self.timer_callback))
-        self.i = 0
-        self.param_x = float(self.get_parameter("drive_linear").get_parameter_value().double_value)
-        self.param_z = float(
-            self.get_parameter("drive_angular").get_parameter_value().double_value)
+        self.cmd_pub = self.create_publisher(Twist, 'cmd_vel', 10)
+        self.scan_sub = self.create_subscription(LaserScan, '/scan', self.scan_callback, 10)
 
-        self.get_logger().warn('Logger is: ' + self.get_logger().get_effective_level().name)
-        self.get_logger().info('Logger is: info ')
-        self.get_logger().debug('Logger is: debug')
+        self.timer = self.create_timer(self.loop_rate, self.timer_callback)
+
+        self.state = 1  # 1: form diamond, 2: wide, 3: narrow, 4: expand
+        self.start_time = self.get_clock().now().seconds_nanoseconds()[0]
+        self.obstacle_detected = False
+
+    def scan_callback(self, msg):
+        ranges = np.array(msg.ranges)
+        ranges = ranges[np.isfinite(ranges)]
+        if len(ranges) == 0:
+            return
+        min_dist = np.min(ranges)
+        self.obstacle_detected = (min_dist < 0.6)
+
+    def get_movement_for_state(self):
+        # Format: [linear_x, angular_z]
+        formation = {
+            1: {  # Move to diamond
+                1: [0.2, 0.0],
+                2: [0.2, 0.5],
+                3: [0.2, -0.5],
+                4: [0.2, 0.0]
+            },
+            2: {  # Maintain wide diamond
+                1: [0.15, 0.0],
+                2: [0.15, 0.4],
+                3: [0.15, -0.4],
+                4: [0.14, 0.0]
+            },
+            3: {  # Narrow formation to pass
+                1: [0.15, 0.0],
+                2: [0.13, 0.2],
+                3: [0.13, -0.2],
+                4: [0.12, 0.0]
+            },
+            4: {  # Expand back to wide
+                1: [0.15, 0.0],
+                2: [0.15, 0.5],
+                3: [0.15, -0.5],
+                4: [0.14, 0.0]
+            }
+        }
+        return formation[self.state].get(self.robot_id, [0.0, 0.0])
 
     def timer_callback(self):
-        """Publish the configured twist message when called."""
+        now = self.get_clock().now().seconds_nanoseconds()[0]
+        elapsed = now - self.start_time
 
-        msg = Twist()
-        # command to publish the message in the terminal by hand
-        # ros2 topic pub --once /cmd_vel geometry_msgs/msg/Twist "{
-        # linear: {x: 0.26, y: 0.0, z: 0.0},
-        # angular: {x: 0.0, y: 0.0, z: 0.0}
-        # }"
-        msg.linear.x = self.param_x
-        msg.angular.z = self.param_z
-        self.command_publisher.publish(msg)
-        self.get_logger().debug('Publishing {}:"{}"'.format(self.i, msg))
-        self.i += 1
+        # Simple transitions based on time and obstacle
+        if self.state == 1 and elapsed > 10:
+            self.state = 2
+            self.start_time = now
+            self.get_logger().info("Holding wide diamond formation.")
+        elif self.state == 2 and self.obstacle_detected:
+            self.state = 3
+            self.start_time = now
+            self.get_logger().info("Narrowing to pass obstacle.")
+        elif self.state == 3 and elapsed > 10:
+            self.state = 4
+            self.start_time = now
+            self.get_logger().info("Expanding back to wide formation.")
+        elif self.state == 4 and elapsed > 10:
+            self.state = 2  # Loop between wide–narrow–wide
+            self.start_time = now
+            self.get_logger().info("Back to wide formation.")
 
+        # Publish motion command
+        cmd = Twist()
+        cmd.linear.x, cmd.angular.z = self.get_movement_for_state()
+        self.cmd_pub.publish(cmd)
 
 def main(args=None):
-    """
-    Create a node for the drive pattern, spin it
-    and handle the setup.
-    """
-    setup_node.init_and_spin(args, DrivePattern)
-
+    rclpy.init(args=args)
+    node = DrivePatternNode()
+    rclpy.spin(node)
+    node.destroy_node()
+    rclpy.shutdown()
 
 if __name__ == '__main__':
     main()
