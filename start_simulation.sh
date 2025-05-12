@@ -28,8 +28,7 @@ source ./install/setup.bash &&
  y_dist:=1.0 \
  driving_swarm:=False \
  logging:=True \
- robot_names_file:=/root/driving_swarm_infrastructure/s
-rc/driving_swarm_bringup/config/robot_names/robot4.yaml
+ robot_names_file:=/root/driving_swarm_infrastructure/src/driving_swarm_bringup/config/robot_names/robot4.yaml
  
 # to add heterogeneous swarm / robots  
 # bash add_robots_to_simulation.sh 
